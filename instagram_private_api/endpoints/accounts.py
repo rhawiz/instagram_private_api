@@ -11,6 +11,7 @@ from ..http import MultipartFormDataEncoder
 from ..compatpatch import ClientCompatPatch
 from socket import timeout, error as SocketError
 from ssl import SSLError
+
 try:
     ConnectionError = ConnectionError
 except NameError:  # Python 2:
@@ -60,6 +61,9 @@ class AccountsEndpointsMixin(object):
                 'Unable to get csrf from login.',
                 error_response=self._read_response(login_response))
 
+        if self.checkpoint_required:
+            return login_response
+
         login_json = json.loads(self._read_response(login_response))
 
         if not login_json.get('logged_in_user', {}).get('pk'):
@@ -69,15 +73,15 @@ class AccountsEndpointsMixin(object):
             on_login_callback = self.on_login
             on_login_callback(self)
 
-        # # Post-login calls in client
-        # self.sync()
-        # self.autocomplete_user_list()
-        # self.feed_timeline()
-        # self.ranked_recipients()
-        # self.recent_recipients()
-        # self.direct_v2_inbox()
-        # self.news_inbox()
-        # self.explore()
+            # # Post-login calls in client
+            # self.sync()
+            # self.autocomplete_user_list()
+            # self.feed_timeline()
+            # self.ranked_recipients()
+            # self.recent_recipients()
+            # self.direct_v2_inbox()
+            # self.news_inbox()
+            # self.explore()
 
     def current_user(self):
         """Get current user info"""
@@ -169,10 +173,10 @@ class AccountsEndpointsMixin(object):
                 self.logger.warn('Error parsing error response: {}'.format(str(ve)))
             raise ClientError(error_msg, e.code, error_response)
         except (SSLError, timeout, SocketError,
-                compat_urllib_error.URLError,   # URLError is base of HTTPError
+                compat_urllib_error.URLError,  # URLError is base of HTTPError
                 compat_http_client.HTTPException) as connection_error:
-                raise ClientConnectionError('{} {}'.format(
-                    connection_error.__class__.__name__, str(connection_error)))
+            raise ClientConnectionError('{} {}'.format(
+                connection_error.__class__.__name__, str(connection_error)))
 
         post_response = self._read_response(response)
         self.logger.debug('RESPONSE: {0:d} {1!s}'.format(response.code, post_response))

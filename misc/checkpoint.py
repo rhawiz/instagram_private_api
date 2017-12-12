@@ -108,7 +108,7 @@ if __name__ == '__main__':
     print('** THIS IS UNLIKELY TO BE WORKING **')
     print('------------------------------------')
     try:
-        user_id = None
+        user_id = 6244401359
         while not user_id:
             user_id = input('User ID (numeric): ')
 

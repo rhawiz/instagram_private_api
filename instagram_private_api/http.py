@@ -4,7 +4,7 @@ import codecs
 import mimetypes
 import random
 import string
-from .compat import compat_cookiejar, compat_pickle
+from instagram_private_api.compat import compat_cookiejar, compat_pickle
 
 
 class ClientCookieJar(compat_cookiejar.CookieJar):

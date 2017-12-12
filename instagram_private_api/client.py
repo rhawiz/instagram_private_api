@@ -8,6 +8,7 @@
 import logging
 import hmac
 import hashlib
+import os
 import uuid
 import json
 import re
@@ -19,15 +20,21 @@ from io import BytesIO
 import warnings
 from socket import timeout, error as SocketError
 from ssl import SSLError
-from .compat import (
+from instagram_private_api.compat import compat_cookiejar, compat_pickle, compat_cookies
+
+import requests
+
+from instagram_private_api.compat import (
     compat_urllib_parse, compat_urllib_error,
     compat_urllib_request, compat_urllib_parse_urlparse,
     compat_http_client)
+from instagram_private_api.utils import to_json
 from .errors import (
     ClientErrorCodes, ClientError, ClientLoginError,
     ClientLoginRequiredError, ClientCookieExpiredError,
     ClientThrottledError, ClientConnectionError
 )
+
 try:  # Python 3:
     # Not a no-op, we're adding this to the namespace so it can be imported.
     ConnectionError = ConnectionError
@@ -83,6 +90,7 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
             - **cookie**: Saved cookie string from a previous session
             - **settings**: A dict of settings from a previous session
             - **on_login**: Callback after successful login
+            - **checkpoint_headers**: headers for checkpoints
             - **proxy**: Specify a proxy ex: 'http://127.0.0.1:8888' (ALPHA)
         :return:
         """
@@ -94,6 +102,7 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
         self.timeout = kwargs.pop('timeout', 15)
         self.on_login = kwargs.pop('on_login', None)
         self.logger = logger
+        self.checkpoint_required = False
 
         user_settings = kwargs.pop('settings', None) or {}
         self.uuid = (
@@ -111,7 +120,9 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
         self.ig_capabilities = (
             kwargs.pop('ig_capabilities', None) or user_settings.get('ig_capabilities') or
             self.IG_CAPABILITIES)
-
+        self.checkpoint_headers = (
+            kwargs.pop('checkpoint_headers', None) or user_settings.get('checkpoint_headers') or
+            None)
         # to maintain backward compat for user_agent kwarg
         custom_ua = kwargs.pop('user_agent', '') or user_settings.get('user_agent')
         if custom_ua:
@@ -187,7 +198,7 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
             kwargs.pop('ad_id', None) or user_settings.get('ad_id') or
             self.generate_adid())
 
-        if not cookie_string:   # [TODO] There's probably a better way than to depend on cookie_string
+        if not cookie_string:  # [TODO] There's probably a better way than to depend on cookie_string
             if not self.username or not self.password:
                 raise ClientLoginRequiredError('login_required', code=400)
             self.login()
@@ -204,6 +215,7 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
             'device_id': self.device_id,
             'ad_id': self.ad_id,
             'cookie': self.cookie_jar.dump(),
+            'checkpoint_headers': self.checkpoint_headers or {},
             'created_ts': int(time.time())
         }
 
@@ -457,7 +469,7 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
         data = None
         if params or params == '':
             headers['Content-type'] = 'application/x-www-form-urlencoded; charset=UTF-8'
-            if params == '':    # force post if empty string
+            if params == '':  # force post if empty string
                 data = ''.encode('ascii')
             else:
                 if not unsigned:
@@ -477,6 +489,7 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
             self.logger.debug('REQUEST: {0!s} {1!s}'.format(url, req.get_method()))
             self.logger.debug('DATA: {0!s}'.format(data))
             response = self.opener.open(req, timeout=self.timeout)
+
         except compat_urllib_error.HTTPError as e:
             error_msg = e.reason
             error_response = self._read_response(e)
@@ -498,9 +511,16 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
             except ValueError as ve:
                 # do nothing else, prob can't parse json
                 self.logger.warn('Error parsing error response: {}'.format(str(ve)))
-            raise ClientError(error_msg, e.code, error_response)
+
+            error_response_dict = json.loads(error_response)
+            if error_response_dict.get("error_type", "") == "checkpoint_challenge_required":
+                self.checkpoint_required = True
+                self.challenge_response = error_response_dict
+                response = error_response
+            else:
+                raise ClientError(error_msg, e.code, error_response)
         except (SSLError, timeout, SocketError,
-                compat_urllib_error.URLError,   # URLError is base of HTTPError
+                compat_urllib_error.URLError,  # URLError is base of HTTPError
                 compat_http_client.HTTPException,
                 ConnectionError) as connection_error:
             raise ClientConnectionError('{} {}'.format(
@@ -525,3 +545,54 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
                 error_response=json.dumps(json_response))
 
         return json_response
+
+    def trigger_checkpoint(self):
+        csrftoken = self.get_cookie_value("csrftoken")
+        rur = self.get_cookie_value("rur")
+        mid = self.get_cookie_value("mid")
+        ds_user_id = self.get_cookie_value("ds_user_id")
+        expires = self.get_cookie_value("expires")
+        cookie_string = "csrftoken={csrftoken}; rur={rur}; mid={mid}; ds_user_id={ds_user_id}; expires={expires}".format(
+            csrftoken=csrftoken, rur=rur, mid=mid, ds_user_id=ds_user_id, expires=expires)
+        url = self.challenge_response.get("challenge").get("url")
+        if not url:
+            raise ClientError("Challenge not required")
+
+        headers = {
+            "accept": "*/*",
+            "accept-encoding": "gzip, deflate, br",
+            "accept-language": "en-GB,ar-SY;q=0.8,ar;q=0.6,en-US;q=0.4,en;q=0.2",
+            "content-length": "8",
+            "content-type": "application/x-www-form-urlencoded",
+            "x-csrftoken": csrftoken,
+            "cookie": cookie_string,
+            "origin": "https://i.instagram.com",
+            "referer": url,
+            "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.91 Safari/537.36",
+            "x-instagram-ajax": "1",
+            "x-requested-with": "XMLHttpRequest"
+        }
+        data = {
+            "choice": "1"
+        }
+        session = requests.session()
+        resp = session.post(url, headers=headers, data=data)
+        self.checkpoint_headers = headers
+        return resp
+
+    def settings_dump(self):
+        return json.dumps(self.settings, default=to_json)
+
+    def respond_to_checkpoint(self, code):
+        headers = self.checkpoint_headers
+        form_data = {
+            "security_code": code
+        }
+        session = requests.session()
+
+        resp = session.post(url=headers.get("referer"), headers=headers, data=form_data)
+
+        for cookie in resp.cookies:
+            self.opener.cookie_jar.set_cookie(cookie)
+        self.checkpoint_required = False
+        return resp
