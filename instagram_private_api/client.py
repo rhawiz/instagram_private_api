@@ -568,7 +568,7 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
             "cookie": cookie_string,
             "origin": "https://i.instagram.com",
             "referer": url,
-            "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.91 Safari/537.36",
+            "user-agent": self.user_agent,
             "x-instagram-ajax": "1",
             "x-requested-with": "XMLHttpRequest"
         }
@@ -592,7 +592,12 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
 
         resp = session.post(url=headers.get("referer"), headers=headers, data=form_data)
 
+        if resp.status_code == 400:
+            return False
+
         for cookie in resp.cookies:
             self.opener.cookie_jar.set_cookie(cookie)
+
         self.checkpoint_required = False
-        return resp
+
+        return True
