@@ -467,6 +467,7 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
 
         headers = self.default_headers
         data = None
+
         if params or params == '':
             headers['Content-type'] = 'application/x-www-form-urlencoded; charset=UTF-8'
             if params == '':  # force post if empty string
@@ -513,6 +514,7 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
                 self.logger.warn('Error parsing error response: {}'.format(str(ve)))
 
             error_response_dict = json.loads(error_response)
+
             if error_response_dict.get("error_type", "") == "checkpoint_challenge_required":
                 self.checkpoint_required = True
                 self.challenge_response = error_response_dict
@@ -592,12 +594,10 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
 
         resp = session.post(url=headers.get("referer"), headers=headers, data=form_data)
 
-        if resp.status_code == 400:
-            return False
-
         for cookie in resp.cookies:
             self.opener.cookie_jar.set_cookie(cookie)
 
-        self.checkpoint_required = False
+        if resp.status_code in (200, 201):
+            self.checkpoint_required = False
 
-        return True
+        return resp.json()

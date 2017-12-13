@@ -9,6 +9,10 @@ if __name__ == '__main__':
         print("Checkpoint triggered, check your email")
         api.trigger_checkpoint()
 
+    else:
+        print(api.user_following(api.authenticated_user_id))
+        exit()
+
     security_code = None
     while not security_code:
         security_code = input('Security code (6-digit code emailed to you): ')
