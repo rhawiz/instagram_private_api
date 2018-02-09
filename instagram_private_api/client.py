@@ -493,6 +493,8 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
 
         except compat_urllib_error.HTTPError as e:
             error_msg = e.reason
+            print(e)
+            print(type(e))
             error_response = self._read_response(e)
             self.logger.debug('RESPONSE: {0:d} {1!s}'.format(e.code, error_response))
             try:
