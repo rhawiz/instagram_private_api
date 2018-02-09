@@ -515,7 +515,7 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
 
             error_response_dict = json.loads(error_response)
             print(error_response_dict)
-            if "checkpoint_challenge" in error_response_dict.get("error_type", ""):
+            if "checkpoint_challenge" in error_response_dict.get("error_type", "") or "challenge_required" in error_msg:
                 self.checkpoint_required = True
                 self.challenge_response = error_response_dict
                 response = error_response
