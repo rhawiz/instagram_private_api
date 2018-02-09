@@ -21,7 +21,7 @@ import warnings
 from socket import timeout, error as SocketError
 from ssl import SSLError
 from instagram_private_api.compat import compat_cookiejar, compat_pickle, compat_cookies
-
+from urllib.error import HTTPError
 import requests
 
 from instagram_private_api.compat import (
@@ -442,6 +442,8 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
         :param response:
         :return:
         """
+        if isinstance(response, str):
+            return response
         if response.info().get('Content-Encoding') == 'gzip':
             buf = BytesIO(response.read())
             res = gzip.GzipFile(fileobj=buf).read().decode('utf8')
@@ -487,16 +489,13 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
 
         req = compat_urllib_request.Request(url, data, headers=headers)
         try:
-            self.logger.debug('REQUEST: {0!s} {1!s}'.format(url, req.get_method()))
-            self.logger.debug('DATA: {0!s}'.format(data))
+
             response = self.opener.open(req, timeout=self.timeout)
 
         except compat_urllib_error.HTTPError as e:
             error_msg = e.reason
-            print(e)
-            print(type(e))
+
             error_response = self._read_response(e)
-            self.logger.debug('RESPONSE: {0:d} {1!s}'.format(e.code, error_response))
             try:
                 error_obj = json.loads(error_response)
                 if error_obj.get('message') == 'login_required':
@@ -513,14 +512,17 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
                 raise
             except ValueError as ve:
                 # do nothing else, prob can't parse json
-                self.logger.warn('Error parsing error response: {}'.format(str(ve)))
-
+                pass
             error_response_dict = json.loads(error_response)
-            print(error_response_dict)
-            if "checkpoint_challenge" in error_response_dict.get("error_type", "") or "challenge_required" in error_msg:
+            challenge_required = error_response_dict.get("message") == "challenge_required"
+
+            if challenge_required:
+                print(error_response_dict)
                 self.checkpoint_required = True
                 self.challenge_response = error_response_dict
-                response = error_response
+                return json.loads(error_response)
+                # response = error_response
+
             else:
                 raise ClientError(error_msg, e.code, error_response)
         except (SSLError, timeout, SocketError,
@@ -534,7 +536,7 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
             return response
 
         response_content = self._read_response(response)
-        self.logger.debug('RESPONSE: {0:d} {1!s}'.format(response.code, response_content))
+
         json_response = json.loads(response_content)
 
         if json_response.get('message', '') == 'login_required':
@@ -558,7 +560,7 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
         expires = self.get_cookie_value("expires")
         cookie_string = "csrftoken={csrftoken}; rur={rur}; mid={mid}; ds_user_id={ds_user_id}; expires={expires}".format(
             csrftoken=csrftoken, rur=rur, mid=mid, ds_user_id=ds_user_id, expires=expires)
-        url = self.challenge_response.get("challenge").get("url")
+        url = self.challenge_response.get("challenge").get("url") if self.challenge_response else None
         if not url:
             raise ClientError("Challenge not required")
 
@@ -584,14 +586,50 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
         self.checkpoint_headers = headers
         return resp
 
+    def trigger_checkpoint_phone(self, phone_number):
+        csrftoken = self.get_cookie_value("csrftoken")
+        rur = self.get_cookie_value("rur")
+        mid = self.get_cookie_value("mid")
+        ds_user_id = self.get_cookie_value("ds_user_id")
+        expires = self.get_cookie_value("expires")
+        cookie_string = "csrftoken={csrftoken}; rur={rur}; mid={mid}; ds_user_id={ds_user_id}; expires={expires}".format(
+            csrftoken=csrftoken, rur=rur, mid=mid, ds_user_id=ds_user_id, expires=expires)
+        url = self.challenge_response.get("challenge").get("url") if self.challenge_response else None
+        if not url:
+            raise ClientError("Challenge not required")
+
+        headers = {
+            "accept": "*/*",
+            "accept-encoding": "gzip, deflate, br",
+            "accept-language": "en-GB,ar-SY;q=0.8,ar;q=0.6,en-US;q=0.4,en;q=0.2",
+            "content-type": "application/x-www-form-urlencoded",
+            "x-csrftoken": csrftoken,
+            "cookie": cookie_string,
+            "origin": "https://i.instagram.com",
+            "referer": url,
+            "user-agent": self.user_agent,
+            "x-instagram-ajax": "1",
+            "x-requested-with": "XMLHttpRequest"
+        }
+        data = {
+            "phone_number": phone_number
+        }
+        session = requests.session()
+
+        resp = session.post(url, headers=headers, data=data)
+        self.checkpoint_headers = headers
+        return resp
+
     def settings_dump(self):
         return json.dumps(self.settings, default=to_json)
 
-    def respond_to_checkpoint(self, code):
+    def respond_to_checkpoint(self, code, phone_number=None):
         headers = self.checkpoint_headers
         form_data = {
             "security_code": code
         }
+        if phone_number:
+            form_data["phone_number"] = phone_number
         session = requests.session()
 
         resp = session.post(url=headers.get("referer"), headers=headers, data=form_data)
