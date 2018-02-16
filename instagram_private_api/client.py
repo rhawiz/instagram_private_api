@@ -520,6 +520,7 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
                 print(error_response_dict)
                 self.checkpoint_required = True
                 self.challenge_response = error_response_dict
+                self.checkpoint_headers = error_response_dict
                 return json.loads(error_response)
                 # response = error_response
 
@@ -560,7 +561,7 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
         expires = self.get_cookie_value("expires")
         cookie_string = "csrftoken={csrftoken}; rur={rur}; mid={mid}; ds_user_id={ds_user_id}; expires={expires}".format(
             csrftoken=csrftoken, rur=rur, mid=mid, ds_user_id=ds_user_id, expires=expires)
-        url = self.challenge_response.get("challenge").get("url") if self.challenge_response else None
+        url = self.checkpoint_headers.get("challenge").get("url") if self.checkpoint_headers else None
         if not url:
             raise ClientError("Challenge not required")
 
@@ -594,7 +595,7 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
         expires = self.get_cookie_value("expires")
         cookie_string = "csrftoken={csrftoken}; rur={rur}; mid={mid}; ds_user_id={ds_user_id}; expires={expires}".format(
             csrftoken=csrftoken, rur=rur, mid=mid, ds_user_id=ds_user_id, expires=expires)
-        url = self.challenge_response.get("challenge").get("url") if self.challenge_response else None
+        url = self.checkpoint_headers.get("challenge").get("url") if self.checkpoint_headers else None
         if not url:
             raise ClientError("Challenge not required")
 
