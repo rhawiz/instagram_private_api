@@ -561,7 +561,7 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
         expires = self.get_cookie_value("expires")
         cookie_string = "csrftoken={csrftoken}; rur={rur}; mid={mid}; ds_user_id={ds_user_id}; expires={expires}".format(
             csrftoken=csrftoken, rur=rur, mid=mid, ds_user_id=ds_user_id, expires=expires)
-        url = self.checkpoint_headers.get("challenge").get("url", {}) if self.checkpoint_headers else None
+        url = self.checkpoint_headers.get("challenge", {}).get("url") if self.checkpoint_headers else None
         if not url:
             url = self.checkpoint_headers.get("referer")
             if not url:
@@ -597,7 +597,7 @@ class Client(AccountsEndpointsMixin, DiscoverEndpointsMixin, FeedEndpointsMixin,
         expires = self.get_cookie_value("expires")
         cookie_string = "csrftoken={csrftoken}; rur={rur}; mid={mid}; ds_user_id={ds_user_id}; expires={expires}".format(
             csrftoken=csrftoken, rur=rur, mid=mid, ds_user_id=ds_user_id, expires=expires)
-        url = self.checkpoint_headers.get("challenge").get("url", {}) if self.checkpoint_headers else None
+        url = self.checkpoint_headers.get("challenge", {}).get("url") if self.checkpoint_headers else None
         if not url:
             url = self.checkpoint_headers.get("referer")
             if not url:
